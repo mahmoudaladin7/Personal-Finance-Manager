@@ -1,6 +1,8 @@
 from  decimal import Decimal
 from pathlib import Path
 import sys
+from typing import Optional
+from datetime import date
 from storage import read_json, write_json, append_transactions_csv, read_transactions_csv
 from users import register_user, authenticate
 from transactions import (
@@ -9,11 +11,21 @@ from transactions import (
     persist_transaction,
     list_user_transactions,
 )
+from reports import (
+    ReportFilters,
+    load_user_rows,
+    balance_summary,
+    totals_by_category,
+    totals_by_month,
+    fmt_money,
+    render_console_table,
+)
+from transactions import parse_iso_date
 
-
-
+# CLI session state is shared across menus so we always know who is active.
 CURRENT_USER: dict | None = None
 
+# Resolve the project structure once; every data touch should go through these.
 App_ROOT = Path(__file__).resolve().parent
 Data_DIR= App_ROOT / 'data'
 BACKUP_DIR = App_ROOT / "backups"
@@ -25,7 +37,7 @@ SUPPORTED_METHODS = ("Cash", "Debit Card", "Credit Card", "Bank Transfer", "Wall
 
 
 def print_banner()-> None:
-
+    # Lightweight splash to make the CLI feel intentional.
     print("=" * 58)
     print("💰 Personal Finance Manager (Console Edition)")
     print("=" * 58)
@@ -33,8 +45,7 @@ def print_banner()-> None:
 def main_menu() -> None:
    global CURRENT_USER 
 
-
-
+   # Main navigation loop; stays active until the user exits.
    while True:
         print("\nMain Menu")
         print("[1] Login / Switch user")
@@ -51,6 +62,7 @@ def main_menu() -> None:
         elif choice == "1":
             
             
+            # Nested loop handles register/login/logout without leaving the main menu.
             while True:
                  if CURRENT_USER:
                     print(f"\n👤 Current user: {CURRENT_USER['name']} [{CURRENT_USER['currency']}]")
@@ -173,26 +185,168 @@ def main_menu() -> None:
         )
                 print(fmt_row(line, widths))
         elif choice == "4":
-            print("TODO: implement reports")
+             if CURRENT_USER is None:
+                print("🔒 Please login first (Menu → [1] Login / Switch user).")
+                continue
+
+             while True:
+                print("\nReports")
+                print("[1] Balance summary (all time)")
+                print("[2] Category totals (with optional filters)")
+                print("[3] Monthly totals (with optional filters)")
+                print("[4] Filtered listing (show rows)")
+                print("[0] Back")
+
+                sub = input("Select an option: ").strip()
+
+                if sub == "0":
+                    break
+
+                elif sub == "1":
+                    rows = load_user_rows(TXNS_CSV, CURRENT_USER["user_id"])
+                    s = balance_summary(rows)
+                    data = [
+                        ("Total income",  fmt_money(s["income"],  CURRENT_USER["currency"])),
+                        ("Total expense", fmt_money(s["expense"], CURRENT_USER["currency"])),
+                        ("Net",           fmt_money(s["net"],     CURRENT_USER["currency"])),
+                    ]
+                    print()
+                    render_console_table(data, headers=("Metric", "Amount"))
+
+                elif sub == "2":
+                    
+                    print("\n(Optional) Enter filters or press Enter to skip.")
+                    start_s = input("Start date (YYYY-MM-DD): ").strip()
+                    end_s   = input("End date   (YYYY-MM-DD): ").strip()
+                    pm      = input("Payment method (exact): ").strip()
+                    cat     = input("Category (exact): ").strip()
+                    ttype   = input("Type (income/expense): ").strip()
+
+                    def parse_opt_date(s: str) -> Optional[date]:
+                        return parse_iso_date(s) if s else None
+
+                    filters = ReportFilters()
+                    filters.start = parse_opt_date(start_s)
+                    filters.end = parse_opt_date(end_s)
+                    filters.payment_method = pm or None
+                    filters.category = cat or None
+                    filters.type = ttype or None
+
+                    rows = load_user_rows(TXNS_CSV, CURRENT_USER["user_id"], filters)
+                    if not rows:
+                        print("No matching transactions.")
+                        continue
+
+                    agg = totals_by_category(rows)
+                    printable = [(cat, fmt_money(total, CURRENT_USER["currency"])) for cat, total in agg]
+                    print()
+                    render_console_table(printable, headers=("Category", "Total"), widths=(24, 16))
+
+                elif sub == "3":
+                    # Monthly totals with optional filters
+                    print("\n(Optional) Enter filters or press Enter to skip.")
+                    start_s = input("Start date (YYYY-MM-DD): ").strip()
+                    end_s   = input("End date   (YYYY-MM-DD): ").strip()
+                    pm      = input("Payment method (exact): ").strip()
+                    cat     = input("Category (exact): ").strip()
+                    ttype   = input("Type (income/expense): ").strip()
+
+                    def parse_opt_date(s: str) -> Optional[date]:
+                        return parse_iso_date(s) if s else None
+
+                    filters = ReportFilters()
+                    filters.start = parse_opt_date(start_s)
+                    filters.end = parse_opt_date(end_s)
+                    filters.payment_method = pm or None
+                    filters.category = cat or None
+                    filters.type = ttype or None
+
+                    rows = load_user_rows(TXNS_CSV, CURRENT_USER["user_id"], filters)
+                    if not rows:
+                        print("No matching transactions.")
+                        continue
+
+                    agg = totals_by_month(rows)  # [('2025-09', Decimal(...)), ...]
+                    printable = [(label, fmt_money(total, CURRENT_USER["currency"])) for label, total in agg]
+                    print()
+                    render_console_table(printable, headers=("Month", "Total"), widths=(10, 16))
+
+                elif sub == "4":
+                    print("\n(Optional) Enter filters or press Enter to skip.")
+                    start_s = input("Start date (YYYY-MM-DD): ").strip()
+                    end_s   = input("End date   (YYYY-MM-DD): ").strip()
+                    pm      = input("Payment method (exact): ").strip()
+                    cat     = input("Category (exact): ").strip()
+                    ttype   = input("Type (income/expense): ").strip()
+
+                    def parse_opt_date(s: str) -> Optional[date]:
+                        return parse_iso_date(s) if s else None
+
+                    filters = ReportFilters()
+                    filters.start = parse_opt_date(start_s)
+                    filters.end = parse_opt_date(end_s)
+                    filters.payment_method = pm or None
+                    filters.category = cat or None
+                    filters.type = ttype or None
+
+                    rows = load_user_rows(TXNS_CSV, CURRENT_USER["user_id"], filters)
+                    if not rows:
+                        print("No matching transactions.")
+                        continue
+
+                    # Reuse the same simple “table” formatter from Lesson 3
+                    headers = ("ID", "Type", "Amount", "Category", "Date", "Method", "Description")
+                    widths = [10, 8, 12, 14, 12, 14, 40]
+
+                    def fmt_row(cols, widths):
+                        cells = []
+                        for c, w in zip(cols, widths):
+                            s = (c if c is not None else "")
+                            if len(s) > w:
+                                s = s[: w - 1] + "…"
+                            cells.append(s.ljust(w))
+                        return "  ".join(cells)
+
+                    print()
+                    print(fmt_row(headers, widths))
+                    print("-" * (sum(widths) + 2 * (len(widths) - 1)))
+
+                    for r in rows:
+                        amt = r.get("amount", "")
+                        if CURRENT_USER and "currency" in CURRENT_USER:
+                            amt = f"{amt} {CURRENT_USER['currency']}"
+                        line = (
+                            r.get("transaction_id", ""),
+                            r.get("type", ""),
+                            amt,
+                            r.get("category", ""),
+                            r.get("date", ""),
+                            r.get("payment_method", ""),
+                            r.get("description", "") or "",
+                        )
+                        print(fmt_row(line, widths))
+
+                else:
+                        print("⚠️ Invalid choice. Try again.")
         elif choice == "5":
-    
+            # Seed demo data + append a smoke-test transaction so backups work out of the box.
             demo_users = read_json(USERS_JSON)
             if not demo_users:
-                demo_users = [{"user_id": "U001", "name": "Demo", "password": "1234", "currency": "USD"}]
-                write_json(USERS_JSON, demo_users)
-                print("Created users.json with a demo user.")
+                    demo_users = [{"user_id": "U001", "name": "Demo", "password": "1234", "currency": "USD"}]
+                    write_json(USERS_JSON, demo_users)
+                    print("Created users.json with a demo user.")
             else:
-                print(f"users.json already has {len(demo_users)} user(s).")
-            append_transactions_csv(TXNS_CSV, [{
-                "transaction_id": "T001",
-                "user_id": "U001",
-                "type": "expense",
-                "amount": Decimal("12.50"),   
-                "category": "Food",
-                "date": "2025-10-12",
-                "description": "Test lunch",
-                "payment_method": "Credit Card",
-    }])
+                        print(f"users.json already has {len(demo_users)} user(s).")
+                        append_transactions_csv(TXNS_CSV, [{
+                        "transaction_id": "T001",
+                        "user_id": "U001",
+                        "type": "expense",
+                        "amount": Decimal("12.50"),   
+                        "category": "Food",
+                        "date": "2025-10-12",
+                        "description": "Test lunch",
+                        "payment_method": "Credit Card",
+            }])
             rows = read_transactions_csv(TXNS_CSV)
             print(f"transactions.csv now has {len(rows)} row(s).")
         else:

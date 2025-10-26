@@ -1,2 +1,4 @@
 transaction_id,user_id,type,amount,category,date,description,payment_method
 T001,U001,expense,12.50,Food,2025-10-12,Test lunch,Credit Card
+T000002,U002,expense,200.00,Food,2025-10-15,,Credit Card
+T000003,U003,income,5000.00,Salary,2025-09-12,,Bank Transfer

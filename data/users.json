@@ -1,0 +1,30 @@
+[
+  {
+    "user_id": "U001",
+    "name": "Demo",
+    "password": "1234",
+    "currency": "USD"
+  },
+  {
+    "user_id": "U002",
+    "name": "Itachi",
+    "currency": "SAR",
+    "auth": {
+      "algo": "pbkdf2_sha256",
+      "iterations": 120000,
+      "salt_b64": "gsaoARsVckjJ/uNFnrxqqQ==",
+      "hash_b64": "VJrSMxVWNlfR5ZOEDTDtnmUZNEyNWX+LnF+zMFCo9eA="
+    }
+  },
+  {
+    "user_id": "U003",
+    "name": "Medo",
+    "currency": "USD",
+    "auth": {
+      "algo": "pbkdf2_sha256",
+      "iterations": 120000,
+      "salt_b64": "dJaWfgrFQz0sJhKfYhBklQ==",
+      "hash_b64": "s41WSIbj22cvvKD3tX4XLBd4h31+UYsx3UdU0O9ZZkk="
+    }
+  }
+]

@@ -43,6 +43,10 @@ A lightweight, terminal-based companion that lets you register users, authentica
    ```powershell
    python main.py
    ```
+3. (Optional) Run the bundled sanity checks:
+   ```powershell
+   python tests_sanity.py
+   ```
 
 ## Usage Tips
 - **Register**: Choose a username (letters/digits/_/-) plus a 3-letter currency code and a numeric PIN (4-12 digits). Records are stored in `data/users.json`.
@@ -59,6 +63,14 @@ A lightweight, terminal-based companion that lets you register users, authentica
 - All reports share a helper in `reports.py`, so parsing/validation logic stays consistent across features.
 
 Demo credentials (added by the backup step): `Demo / 1234` (USD).
+
+## Logging
+- Logging is configured through `logutil.get_logger`; all modules share the same formatter and write both to stderr and `logs/app.log`.
+- Control verbosity with the `LOG_LEVEL` environment variable (`DEBUG`, `INFO`, etc.), e.g. `set LOG_LEVEL=DEBUG` before running the CLI.
+- Key flows now emit structured messages:
+  - Transaction creation (`transactions.create_transaction`) traces the incoming payload at debug level and records persisted IDs at info level.
+  - Backup routines (`backups.create_backup` / `verify_backup`) log each ZIP created, verification run, and any integrity failures.
+- Inspect `logs/app.log` when troubleshooting or verifying that actions (transactions, backups) completed successfully.
 
 ## Data & Backups
 - Users: `data/users.json` (list of dicts; hashed PINs under `auth`)

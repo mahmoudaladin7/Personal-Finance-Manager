@@ -7,6 +7,9 @@ from typing import Dict, Any, List, Optional, Iterable, Tuple
 from datetime import date
 
 from storage import read_transactions_csv, append_transactions_csv
+from logutil import get_logger
+
+LOGGER = get_logger(__name__)
 
 SUPPORTED_TYPES = ("income", "expense")
 SUPPORTED_METHODS = ("Cash", "Debit Card", "Credit Card", "Bank Transfer", "Wallet")
@@ -105,6 +108,7 @@ def persist_transaction(tx_path: Path, tx: NewTransaction, *, tx_id: Optional[st
         "description": tx.description,
         "payment_method": tx.payment_method,
     }])
+     LOGGER.info("Persisted transaction %s for user %s", tid, tx.user_id)
      return tid
 
 def create_transaction(
@@ -126,6 +130,15 @@ def create_transaction(
     v_date = parse_iso_date(date_str)
     v_desc = (description or "").strip()
     v_method = validate_payment_method(payment_method)
+    LOGGER.debug(
+        "Create TX: user=%s type=%s amount=%s category=%s date=%s method=%s",
+        user_id,
+        type,
+        amount,
+        category,
+        date_str,
+        payment_method,
+    )
 
     return NewTransaction(
         user_id=user_id,

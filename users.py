@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from storage import read_json, write_json
+from logutil import get_logger
+LOGGER = get_logger(__name__)
 
 
 class UserAuthSpec:
@@ -111,9 +113,11 @@ def register_user(users_path: Path, name: str, currency: str, pin: str) -> Dict[
       currency = validate_currency(currency)
       pin = validate_pin(pin)
 
+
       users = load_users(users_path)
       if find_user_by_name(users, name) is not None:
         raise ValueError("Username already exists. Choose a different name.")
+      LOGGER.warning("Attempt to re-register existing username: %r", name)
 
    
       next_id_num = len(users) + 1
@@ -125,8 +129,10 @@ def register_user(users_path: Path, name: str, currency: str, pin: str) -> Dict[
         "currency": currency,
         "auth": hash_pin(pin),
     }
+      LOGGER.info("Registering user name=%r currency=%r", name, currency)
       users.append(record)
       save_users(users_path, users)
+      LOGGER.debug("Saved %d users to %s", len(users), users_path)
       return record
 
 def authenticate(users_path: Path, name: str, pin: str) -> Optional[Dict[str, Any]]:

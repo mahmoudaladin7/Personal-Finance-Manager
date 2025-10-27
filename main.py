@@ -22,6 +22,9 @@ from reports import (
 )
 from transactions import parse_iso_date
 from backups import BackupSpec, create_backup, list_backups, verify_backup, restore_backup
+from logutil import get_logger
+
+
 
 # CLI session state is shared across menus so we always know who is active.
 CURRENT_USER: dict | None = None
@@ -36,12 +39,15 @@ TXNS_CSV = Data_DIR / 'transaction.csv'
 SUPPOURTED_TYPES = ("income", "expenses")
 SUPPORTED_METHODS = ("Cash", "Debit Card", "Credit Card", "Bank Transfer", "Wallet")
 
+LOGGER = get_logger("pfm", app_root=App_ROOT)
+
 
 def print_banner()-> None:
     # Lightweight splash to make the CLI feel intentional.
     print("=" * 58)
     print("💰 Personal Finance Manager (Console Edition)")
     print("=" * 58)
+    LOGGER.info("Application started")
 
 def main_menu() -> None:
    global CURRENT_USER 
@@ -421,4 +427,12 @@ def main_menu() -> None:
 
 if __name__ == "__main__":
     print_banner()
-    main_menu()
+    try:
+        main_menu()
+    except KeyboardInterrupt:
+        print("\nInterrupted. Exiting…")
+        LOGGER.warning("Interrupted by user (Ctrl+C)")
+    except Exception as e:
+        print("\nUnexpected error. See logs/app.log for details.")
+        LOGGER.exception("Fatal error: %s", e)
+        sys.exit(1)

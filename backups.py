@@ -8,6 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Dict, Any, List, Optional, Tuple
 from zipfile import ZipFile, ZIP_DEFLATED, ZipInfo
+from logutil import get_logger
+
+LOGGER = get_logger(__name__)
 
 
 def _now_stamp()-> str:
@@ -37,6 +40,7 @@ def create_backup(spec: BackupSpec) -> Path:
     spec.backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = _now_stamp()
     zip_path = spec.backup_dir / f"backup-{stamp}.zip"
+    LOGGER.info("Creating backup zip in %s", spec.backup_dir)
 
     # Read files → compute checksums/sizes → write to zip
     manifest: Dict[str, Dict[str, Any]] = {"files": {}}
@@ -74,6 +78,7 @@ def list_backups(backup_dir: Path) -> List[Path]:
 def verify_backup(zip_path: Path) -> Tuple[bool, List[str]]:
   
     errors: List[str] = []
+    LOGGER.info("Verifying backup: %s", zip_path.name)
     with ZipFile(zip_path, "r") as zf:
         # Load manifest
         try:
@@ -108,7 +113,10 @@ def verify_backup(zip_path: Path) -> Tuple[bool, List[str]]:
         if extra:
             errors.append(f"Extra files not declared in manifest: {sorted(extra)}")
 
-    return (len(errors) == 0), errors
+    ok = len(errors) == 0
+    if not ok:
+        LOGGER.error("Backup verification failed for %s: %s", zip_path.name, errors)
+    return ok, errors
 
 def restore_backup(zip_path: Path, dest_dir: Path, *, overwrite: bool = False) -> List[Path]:
     

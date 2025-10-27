@@ -21,6 +21,7 @@ from reports import (
     render_console_table,
 )
 from transactions import parse_iso_date
+from backups import BackupSpec, create_backup, list_backups, verify_backup, restore_backup
 
 # CLI session state is shared across menus so we always know who is active.
 CURRENT_USER: dict | None = None
@@ -329,26 +330,91 @@ def main_menu() -> None:
                 else:
                         print("⚠️ Invalid choice. Try again.")
         elif choice == "5":
-            # Seed demo data + append a smoke-test transaction so backups work out of the box.
-            demo_users = read_json(USERS_JSON)
-            if not demo_users:
-                    demo_users = [{"user_id": "U001", "name": "Demo", "password": "1234", "currency": "USD"}]
-                    write_json(USERS_JSON, demo_users)
-                    print("Created users.json with a demo user.")
-            else:
-                        print(f"users.json already has {len(demo_users)} user(s).")
-                        append_transactions_csv(TXNS_CSV, [{
-                        "transaction_id": "T001",
-                        "user_id": "U001",
-                        "type": "expense",
-                        "amount": Decimal("12.50"),   
-                        "category": "Food",
-                        "date": "2025-10-12",
-                        "description": "Test lunch",
-                        "payment_method": "Credit Card",
-            }])
-            rows = read_transactions_csv(TXNS_CSV)
-            print(f"transactions.csv now has {len(rows)} row(s).")
+             while True:
+                print("\nBackups")
+                print("[1] Make backup now")
+                print("[2] List backups")
+                print("[3] Verify a backup")
+                print("[4] Restore a backup")
+                print("[0] Back")
+                sub = input("Select an option: ").strip()
+
+                if sub == "0":
+                    break
+
+                elif sub == "1":
+                    # Create a ZIP backup of users.json and transactions.csv
+                    spec = BackupSpec(
+                        backup_dir=BACKUP_DIR,
+                        files=[USERS_JSON, TXNS_CSV],
+                    )
+                    try:
+                        zip_path = create_backup(spec)
+                        print(f"✅ Backup created: {zip_path.name}")
+                    except OSError as e:
+                        print(f"❌ Backup failed: {e}")
+
+                elif sub == "2":
+                    zips = list_backups(BACKUP_DIR)
+                    if not zips:
+                        print("No backups found.")
+                        continue
+                    print("\nAvailable backups (newest first):")
+                    for i, p in enumerate(zips, 1):
+                        print(f"[{i}] {p.name}")
+
+                elif sub == "3":
+                    zips = list_backups(BACKUP_DIR)
+                    if not zips:
+                        print("No backups to verify.")
+                        continue
+                    for i, p in enumerate(zips, 1):
+                        print(f"[{i}] {p.name}")
+                    sel = input("Select backup number to verify: ").strip()
+                    if not sel.isdigit() or not (1 <= int(sel) <= len(zips)):
+                        print("Invalid selection.")
+                        continue
+                    target = zips[int(sel) - 1]
+                    ok, errors = verify_backup(target)
+                    if ok:
+                        print(f"✅ {target.name} integrity OK.")
+                    else:
+                        print(f"❌ {target.name} integrity FAILED:")
+                        for e in errors:
+                            print("  -", e)
+
+                elif sub == "4":
+                    zips = list_backups(BACKUP_DIR)
+                    if not zips:
+                        print("No backups to restore.")
+                        continue
+                    for i, p in enumerate(zips, 1):
+                        print(f"[{i}] {p.name}")
+                    sel = input("Select backup number to restore: ").strip()
+                    if not sel.isdigit() or not (1 <= int(sel) <= len(zips)):
+                        print("Invalid selection.")
+                        continue
+                    target = zips[int(sel) - 1]
+                    print("⚠️ Restoring will overwrite your current data files.")
+                    conf = input("Type 'YES' to continue: ").strip()
+                    if conf != "YES":
+                        print("Restore cancelled.")
+                        continue
+                    try:
+                        restored = restore_backup(target, Data_DIR, overwrite=True)
+                        if restored:
+                            print("✅ Restored files:")
+                            for p in restored:
+                                print("  -", p.name)
+                        else:
+                            print("No data files were restored from this backup.")
+                    except FileExistsError as e:
+                        print(f"❌ {e}")
+                    except OSError as e:
+                        print(f"❌ Restore failed: {e}")
+
+                else:
+                    print("⚠️ Invalid choice. Try again.")
         else:
             print("⚠️ Invalid choice. Try again.")
 

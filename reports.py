@@ -17,6 +17,7 @@ def _parse_amount_str(s: str) -> Decimal:
         raise ValueError(f"Invalid amount string in csv: {s!r}")
     
 # Container for optional CLI filters; default None values mean "no filter".
+@dataclass
 class ReportFilters:
     start: Optional[date] = None
     end: Optional[date] = None
@@ -38,7 +39,7 @@ def _row_matches_filters(row: Dict[str, str],f:ReportFilters)->bool:
             return False
     
     if f.payment_method is not None:
-        if row.get("payment_method") != f.category:
+        if row.get("payment_method") != f.payment_method:
             return False
         
     if f.category is not None:

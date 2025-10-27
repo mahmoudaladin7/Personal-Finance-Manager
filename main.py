@@ -23,6 +23,7 @@ from reports import (
 from transactions import parse_iso_date
 from backups import BackupSpec, create_backup, list_backups, verify_backup, restore_backup
 from logutil import get_logger
+from budgets import set_budget, get_budgets, spend_vs_budget
 
 
 
@@ -40,7 +41,12 @@ SUPPOURTED_TYPES = ("income", "expenses")
 SUPPORTED_METHODS = ("Cash", "Debit Card", "Credit Card", "Bank Transfer", "Wallet")
 
 LOGGER = get_logger("pfm", app_root=App_ROOT)
+BUDGETS_JSON = Data_DIR / "budgets.json"
 
+def current_currency() -> str:
+    if CURRENT_USER and "currency" in CURRENT_USER:
+        return CURRENT_USER["currency"]
+    return ""
 
 def print_banner()-> None:
     # Lightweight splash to make the CLI feel intentional.
@@ -60,6 +66,7 @@ def main_menu() -> None:
         print("[3] View transactions")
         print("[4] Reports")
         print("[5] Save / Backup")
+        print("[6] Budgets")
         print("[0] Exit") 
 
         choice = input("Select an option: ").strip()
@@ -72,7 +79,7 @@ def main_menu() -> None:
             # Nested loop handles register/login/logout without leaving the main menu.
             while True:
                  if CURRENT_USER:
-                    print(f"\n👤 Current user: {CURRENT_USER['name']} [{CURRENT_USER['currency']}]")
+                    print(f"\n👤 Current user: {CURRENT_USER['name']} [{current_currency()}]")
                  else:
                     print("\n👤 Current user: (none)")
                  print("\nUser Menu")
@@ -144,6 +151,22 @@ def main_menu() -> None:
                     payment_method=pm,
         )
                 new_id = persist_transaction(TXNS_CSV, tx)
+                if tx.type == "expense":
+                    month_label = f"{tx.date.year:04d}-{tx.date.month:02d}"
+                    rows = spend_vs_budget(TXNS_CSV, BUDGETS_JSON, CURRENT_USER["user_id"], month_label, type_filter="expense")
+                    # find this category
+                    for cat, actual, budget, delta in rows:
+                        if cat == tx.category:
+                            if budget > 0 and delta < 0:
+                                # over by abs(delta)
+                                over = (-delta).quantize(Decimal("0.01"))
+                                print(f"🚨 Over budget for {cat} in {month_label} by {over} {current_currency()}.")
+                            elif budget > 0 and delta <= Decimal("0.00"):
+                                print(f"⚠️ You have reached your {cat} budget for {month_label}.")
+                            elif budget > 0:
+                                remaining = delta.quantize(Decimal("0.01"))
+                                print(f"ℹ️ Remaining {cat} budget for {month_label}: {remaining} {current_currency()}.")
+                            break
                 print(f"✅ Saved transaction {new_id} for user {CURRENT_USER['name']}.")
             except ValueError as e:
                 print(f"⚠️ {e}")
@@ -177,7 +200,7 @@ def main_menu() -> None:
             for r in rows:
                 amt = r.get("amount", "")
                 if CURRENT_USER and "currency" in CURRENT_USER:
-                    amt = f"{amt} {CURRENT_USER['currency']}"
+                    amt = f"{amt} {current_currency()}"
                 else:
                     amt = str(amt)
 
@@ -321,7 +344,7 @@ def main_menu() -> None:
                     for r in rows:
                         amt = r.get("amount", "")
                         if CURRENT_USER and "currency" in CURRENT_USER:
-                            amt = f"{amt} {CURRENT_USER['currency']}"
+                            amt = f"{amt} {current_currency()}"
                         line = (
                             r.get("transaction_id", ""),
                             r.get("type", ""),
@@ -336,6 +359,7 @@ def main_menu() -> None:
                 else:
                         print("⚠️ Invalid choice. Try again.")
         elif choice == "5":
+            
              while True:
                 print("\nBackups")
                 print("[1] Make backup now")
@@ -419,6 +443,78 @@ def main_menu() -> None:
                     except OSError as e:
                         print(f"❌ Restore failed: {e}")
 
+                else:
+                    print("⚠️ Invalid choice. Try again.")
+        elif choice == "6":
+            if CURRENT_USER is None:
+                print("🔒 Please login first (Menu → [1] Login / Switch user).")
+                continue
+            while True:
+                print("\nBudgets")
+                print("[1] Set/Update monthly category budget")
+                print("[2] List budgets for a month")
+                print("[3] Budget vs Actual (by month)")
+                print("[0] Back")
+                sub = input("Select an option: ").strip()
+
+                if sub == "0":
+                    break
+
+                elif sub == "1":
+                    month = input("Month (YYYY-MM): ").strip()
+                    category = input("Category: ").strip()
+                    amount = input("Budget amount (e.g., 1200 or 1200.00): ").strip()
+                    try:
+                        b = set_budget(BUDGETS_JSON, CURRENT_USER["user_id"], month, category, amount)
+                        print(f"✅ Budget set: {b.category} {b.month} = {b.amount} {current_currency()}")
+                    except ValueError as e:
+                        print(f"⚠️ {e}")
+
+                elif sub == "2":
+                    month = input("Month (YYYY-MM): ").strip()
+                    items = get_budgets(BUDGETS_JSON, CURRENT_USER["user_id"], month or None)
+                    if not items:
+                        print("No budgets found.")
+                        continue
+                    # simple table
+                    headers = ("Category", "Budget")
+                    widths = (20, 16)
+                    def row(label, value): return f"{label.ljust(widths[0])}  {value.ljust(widths[1])}"
+                    print(row(*headers)); print("-" * (sum(widths) + 2))
+                    for it in sorted(items, key=lambda x: x.category.lower()):
+                        print(row(it.category, f"{it.amount} {current_currency()}"))
+
+                elif sub == "3":
+                    month = input("Month (YYYY-MM): ").strip()
+                    try:
+                        rows = spend_vs_budget(TXNS_CSV, BUDGETS_JSON, CURRENT_USER["user_id"], month, type_filter="expense")
+                    except ValueError as e:
+                        print(f"⚠️ {e}")
+                        continue
+                    if not rows:
+                        print("No budgets or transactions for this month.")
+                        continue
+                    # Render table: Category | Actual | Budget | Delta (budget-actual)
+                    headers = ("Category", "Actual", "Budget", "Delta")
+                    widths = (18, 14, 14, 14)
+                    def clip(s, w): return s if len(s) <= w else s[:w-1] + "…"
+                    def fmt_money_budget(val): 
+                        from decimal import Decimal as D
+                        q = D("0.01")
+                        currency = current_currency()
+                        suffix = f" {currency}" if currency else ""
+                        return f"{val.quantize(q)}{suffix}"
+                    print(f"\nBudget vs Actual for {month}")
+                    print(clip(headers[0], widths[0]).ljust(widths[0]),
+                        clip(headers[1], widths[1]).ljust(widths[1]),
+                        clip(headers[2], widths[2]).ljust(widths[2]),
+                        clip(headers[3], widths[3]).ljust(widths[3]))
+                    print("-" * (sum(widths) + 3*2))
+                    for cat, actual, budget, delta in rows:
+                        print(clip(cat, widths[0]).ljust(widths[0]),
+                            clip(fmt_money_budget(actual), widths[1]).ljust(widths[1]),
+                            clip(fmt_money_budget(budget), widths[2]).ljust(widths[2]),
+                            clip(fmt_money_budget(delta), widths[3]).ljust(widths[3]))
                 else:
                     print("⚠️ Invalid choice. Try again.")
         else:

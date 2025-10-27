@@ -8,6 +8,8 @@ from datetime import date
 
 from storage import read_transactions_csv, append_transactions_csv
 from logutil import get_logger
+from typing import Callable
+import csv
 
 LOGGER = get_logger(__name__)
 
@@ -156,3 +158,52 @@ def list_user_transactions(tx_path: Path, user_id: str, *, newest_first: bool = 
     mine = [r for r in rows if r.get("user_id") == user_id]
     mine.sort(key=lambda r: (r.get("date", ""), r.get("transaction_id", "")), reverse=newest_first)
     return mine
+
+
+
+
+def _rewrite_csv(path: Path, rows: List[Dict[str, Any]]) -> None:
+  
+    from storage import CSV_FIELDNAMES
+    with path.open("w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=CSV_FIELDNAMES)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+def get_transaction_by_id(tx_path: Path, tid: str) -> Dict[str, str] | None:
+
+    rows = read_transactions_csv(tx_path)
+    for r in rows:
+        if r.get("transaction_id") == tid:
+            return r
+    return None
+
+def edit_transaction(
+    tx_path: Path,
+    tid: str,
+    updater: Callable[[Dict[str, str]], Dict[str, str] | None]
+) -> bool:
+
+    rows = read_transactions_csv(tx_path)
+    changed = False
+    for i, r in enumerate(rows):
+        if r.get("transaction_id") == tid:
+            new_row = updater(dict(r))
+            if new_row is None:
+                return False
+            rows[i] = new_row
+            changed = True
+            break
+    if changed:
+        _rewrite_csv(tx_path, rows)
+    return changed
+
+def delete_transaction(tx_path: Path, tid: str) -> bool:
+
+    rows = read_transactions_csv(tx_path)
+    new_rows = [r for r in rows if r.get("transaction_id") != tid]
+    if len(new_rows) == len(rows):
+        return False
+    _rewrite_csv(tx_path, new_rows)
+    return True

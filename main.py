@@ -3,11 +3,15 @@ from pathlib import Path
 import sys
 from typing import Optional
 from datetime import date
+from categories import list_categories, merge_categories, rename_category
 from storage import read_json, write_json, append_transactions_csv, read_transactions_csv
 from users import register_user, authenticate
 from transactions import (
     SUPPORTED_METHODS as TX_SUPPORTED_METHODS,
     create_transaction,
+    delete_transaction,
+    edit_transaction,
+    get_transaction_by_id,
     persist_transaction,
     list_user_transactions,
 )
@@ -42,6 +46,7 @@ SUPPORTED_METHODS = ("Cash", "Debit Card", "Credit Card", "Bank Transfer", "Wall
 
 LOGGER = get_logger("pfm", app_root=App_ROOT)
 BUDGETS_JSON = Data_DIR / "budgets.json"
+RECURRENCES_JSON = Data_DIR / "recurrences.json"
 
 def current_currency() -> str:
     if CURRENT_USER and "currency" in CURRENT_USER:
@@ -67,6 +72,10 @@ def main_menu() -> None:
         print("[4] Reports")
         print("[5] Save / Backup")
         print("[6] Budgets")
+        print("[7] Edit/Delete transactions")
+        print("[8] Category manager")
+        print("[9] Import/Export")
+        print("[10] Recurring transactions")
         print("[0] Exit") 
 
         choice = input("Select an option: ").strip()
@@ -118,9 +127,7 @@ def main_menu() -> None:
                         else:
                             print("ℹ️ No user is currently logged in.")
                  else:
-                        print("⚠️ Invalid choice. Try again.")
-                         
-                         
+                        print("⚠️ Invalid choice. Try again.")                     
         elif choice == "2":
             if CURRENT_USER is None:
                 print("🔒 Please login first (Menu → [1] Login / Switch user).")
@@ -225,6 +232,8 @@ def main_menu() -> None:
                 print("[2] Category totals (with optional filters)")
                 print("[3] Monthly totals (with optional filters)")
                 print("[4] Filtered listing (show rows)")
+                print("[5] ASCII chart: Totals by category (optionally filtered)")
+
                 print("[0] Back")
 
                 sub = input("Select an option: ").strip()
@@ -356,6 +365,48 @@ def main_menu() -> None:
                         )
                         print(fmt_row(line, widths))
 
+                elif sub == "5":
+                    print("\n(Optional) Enter filters or press Enter to skip.")
+                    start_s = input("Start date (YYYY-MM-DD): ").strip()
+                    end_s   = input("End date   (YYYY-MM-DD): ").strip()
+                    pm      = input("Payment method (exact): ").strip()
+                    cat     = input("Category (exact): ").strip()
+                    ttype   = input("Type (income/expense): ").strip()
+
+                    def parse_opts_date(s):
+                        from transactions import parse_iso_date
+                        return parse_iso_date(s) if s else None
+
+                    filters = ReportFilters(
+                        start=parse_opts_date(start_s),
+                        end=parse_opts_date(end_s),
+                        payment_method=(pm or None),
+                        category=(cat or None),
+                        type=(ttype or None),
+                    )
+
+                    rows = load_user_rows(TXNS_CSV, CURRENT_USER["user_id"], filters)
+                    if not rows:
+                        print("No matching transactions.")
+                        continue
+
+                    # Build (category, total) pairs with Decimal
+                    from collections import defaultdict
+                    agg = defaultdict(lambda: Decimal("0"))
+                    for r in rows:
+                        try:
+                            amt = Decimal(r.get("amount","0"))
+                        except Exception:
+                            continue
+                        agg[r.get("category","")] += amt
+
+                    # Render bars
+                    from ascii_charts import hbar_chart
+                    pairs = sorted(agg.items(), key=lambda kv: kv[1], reverse=True)
+                    for line in hbar_chart(pairs, width=40):
+                        print(line)
+        
+
                 else:
                         print("⚠️ Invalid choice. Try again.")
         elif choice == "5":
@@ -479,10 +530,10 @@ def main_menu() -> None:
                     # simple table
                     headers = ("Category", "Budget")
                     widths = (20, 16)
-                    def row(label, value): return f"{label.ljust(widths[0])}  {value.ljust(widths[1])}"
-                    print(row(*headers)); print("-" * (sum(widths) + 2))
+                    def format_row(label, value): return f"{label.ljust(widths[0])}  {value.ljust(widths[1])}"
+                    print(format_row(*headers)); print("-" * (sum(widths) + 2))
                     for it in sorted(items, key=lambda x: x.category.lower()):
-                        print(row(it.category, f"{it.amount} {current_currency()}"))
+                        print(format_row(it.category, f"{it.amount} {current_currency()}"))
 
                 elif sub == "3":
                     month = input("Month (YYYY-MM): ").strip()
@@ -517,6 +568,159 @@ def main_menu() -> None:
                             clip(fmt_money_budget(delta), widths[3]).ljust(widths[3]))
                 else:
                     print("⚠️ Invalid choice. Try again.")
+        elif choice == "7":
+            if CURRENT_USER is None:
+                print("🔒 Please login first.")
+                continue
+
+            print("\nEdit/Delete")
+            print("[1] Edit by ID")
+            print("[2] Delete by ID")
+            print("[0] Back")
+            sub = input("Select: ").strip()
+
+            if sub == "1":
+                tid = input("Transaction ID (e.g., T000001): ").strip()
+                row = get_transaction_by_id(TXNS_CSV, tid)
+                if not row or row.get("user_id") != CURRENT_USER["user_id"]:
+                    print("Not found or not your transaction.")
+                else:
+                    print("Leave a field blank to keep current value.")
+                    t_type = input(f"Type [{row['type']}]: ").strip() or row["type"]
+                    amt    = input(f"Amount [{row['amount']}]: ").strip() or row["amount"]
+                    cat    = input(f"Category [{row['category']}]: ").strip() or row["category"]
+                    dstr   = input(f"Date [{row['date']}]: ").strip() or row["date"]
+                    desc   = input(f"Description [{row['description']}]: ").strip() or row["description"]
+                    pm     = input(f"Payment method [{row['payment_method']}]: ").strip() or row["payment_method"]
+
+                    try:
+                        # Re-validate using the same logic
+                        tx = create_transaction(
+                            CURRENT_USER["user_id"],
+                            type=t_type,
+                            amount=amt,
+                            category=cat,
+                            date_str=dstr,
+                            description=desc,
+                            payment_method=pm,
+                        )
+                        def updater(old):
+                            return {
+                                "transaction_id": old["transaction_id"],
+                                "user_id": tx.user_id,
+                                "type": tx.type,
+                                "amount": str(tx.amount),
+                                "category": tx.category,
+                                "date": tx.date.isoformat(),
+                                "description": tx.description,
+                                "payment_method": tx.payment_method,
+                            }
+                        ok = edit_transaction(TXNS_CSV, tid, updater)
+                        print("✅ Updated." if ok else "Nothing changed.")
+                    except ValueError as e:
+                        print(f"⚠️ {e}")
+
+            elif sub == "2":
+                tid = input("Transaction ID (e.g., T000001): ").strip()
+                # Optional: ensure it's the user's
+                row = get_transaction_by_id(TXNS_CSV, tid)
+                if not row or row.get("user_id") != CURRENT_USER["user_id"]:
+                    print("Not found or not your transaction.")
+                else:
+                    conf = input(f"Type YES to delete {tid}: ").strip()
+                    if conf == "YES":
+                        print("✅ Deleted." if delete_transaction(TXNS_CSV, tid) else "Nothing deleted.")
+                    else:
+                        print("Cancelled.")
+        elif choice == "8":
+            if CURRENT_USER is None:
+                print("🔒 Please login first.")
+                continue
+            print("\nCategories")
+            print("[1] List my categories")
+            print("[2] Rename a category")
+            print("[3] Merge categories")
+            print("[0] Back")
+            sub = input("Select: ").strip()
+
+            if sub == "1":
+                cats = list_categories(TXNS_CSV, CURRENT_USER["user_id"])
+                if not cats: print("No categories yet.")
+                else:
+                    print("Your categories:")
+                    for c in cats: print(" -", c)
+
+            elif sub == "2":
+                old = input("Old category: ").strip()
+                new = input("New category: ").strip()
+                n = rename_category(TXNS_CSV, CURRENT_USER["user_id"], old, new)
+                print(f"✅ Renamed {n} row(s).")
+
+            elif sub == "3":
+                sources = input("Comma-separated categories to merge: ").strip()
+                target = input("Target category: ").strip()
+                src_list = [s.strip() for s in sources.split(",") if s.strip()]
+                n = merge_categories(TXNS_CSV, CURRENT_USER["user_id"], src_list, target)
+                print(f"✅ Merged {n} row(s).")
+        elif choice == "9":
+            if CURRENT_USER is None:
+                print("🔒 Please login first.")
+                continue
+            print("\nImport/Export")
+            print("[1] Export my transactions to CSV")
+            print("[2] Import transactions from CSV")
+            print("[0] Back")
+            sub = input("Select: ").strip()
+
+            if sub == "1":
+                outp = input("Destination CSV filename (e.g., my_export.csv): ").strip()
+                from import_export import export_user_transactions
+                n = export_user_transactions(TXNS_CSV, CURRENT_USER["user_id"], App_ROOT / outp)
+                print(f"✅ Exported {n} row(s) to {outp}")
+
+            elif sub == "2":
+                inp = input("Source CSV filename (in project folder): ").strip()
+                from import_export import import_transactions
+                added, skipped = import_transactions(TXNS_CSV, CURRENT_USER["user_id"], App_ROOT / inp)
+                print(f"✅ Imported {added} row(s). Skipped {skipped}.")
+        elif choice == "10":
+            if CURRENT_USER is None:
+                print("🔒 Please login first.")
+                continue
+            print("\nRecurring")
+            print("[1] Add/Update recurrence")
+            print("[2] List my recurrences")
+            print("[3] Post due recurrences for a month")
+            print("[0] Back")
+            sub = input("Select: ").strip()
+
+            from recurring import add_recurrence, list_recurrences, post_due_recurrences
+
+            if sub == "1":
+                cat  = input("Category: ").strip()
+                amt  = input("Amount (e.g., 2500.00): ").strip()
+                t    = input("Type (income/expense): ").strip()
+                pm   = input("Payment method: ").strip()
+                desc = input("Description (optional): ").strip()
+                dom  = int(input("Day of month (1..28): ").strip())
+                try:
+                    add_recurrence(RECURRENCES_JSON, CURRENT_USER["user_id"],
+                                category=cat, amount=amt, type=t, payment_method=pm, description=desc, day_of_month=dom)
+                    print("✅ Recurrence saved.")
+                except ValueError as e:
+                    print(f"⚠️ {e}")
+
+            elif sub == "2":
+                items = list_recurrences(RECURRENCES_JSON, CURRENT_USER["user_id"])
+                if not items: print("No recurrences.")
+                else:
+                    for i in items:
+                        print(f"- {i['type']} {i['amount']} {CURRENT_USER['currency']} | {i['category']} on day {i['day_of_month']} via {i['payment_method']} | {i.get('description','')}")
+            elif sub == "3":
+                month = input("Month (YYYY-MM): ").strip()
+                posted, present = post_due_recurrences(TXNS_CSV, RECURRENCES_JSON, CURRENT_USER["user_id"], month)
+                print(f"✅ Posted {posted} new. Already present: {present}.")
+
         else:
             print("⚠️ Invalid choice. Try again.")
 

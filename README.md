@@ -11,7 +11,8 @@ A lightweight, terminal-based companion that lets you register users, authentica
 - Validated transaction capture (type, amount, category, ISO date, payment method) with auto-generated IDs
 - Currency-aware transaction viewer that renders a fixed-width table per user
 - Reporting hub with balance summaries, category totals, month-over-month trends, and filtered listings
-- Demo data seeding plus backup helpers so you can explore the workflow quickly
+- Backup center with ZIP snapshots, manifest-based verification, and selective restore tools
+- Demo data seeding plus helper scripts so you can explore the workflow quickly
 
 ## Project Status & Roadmap
 - [done] Milestone 1: Core CLI shell, user registration/authentication, JSON/CSV persistence helpers
@@ -24,6 +25,8 @@ A lightweight, terminal-based companion that lets you register users, authentica
 - `users.py` - validation, registration, and authentication logic
 - `storage.py` - JSON/CSV utilities shared by the app
 - `transactions.py` - validation helpers, dataclass model, persistence utilities
+- `reports.py` - reporting filters, aggregations, and shared console formatting
+- `backups.py` - ZIP backup helpers with SHA-256 manifests plus list/verify/restore utilities
 - `data/` - runtime state (`users.json`, `transaction.csv`)
 - `backups/` - safe place to write exports or snapshots (git-ignored)
 
@@ -46,8 +49,8 @@ A lightweight, terminal-based companion that lets you register users, authentica
 - **Login**: Authenticate with username + PIN. Successful logins populate `CURRENT_USER` and display currency info.
 - **Add transaction** (`[2]`): Once logged in, supply type (`income`/`expense`), amount (validated `Decimal`), category, ISO date, optional description, and one of the supported payment methods. Entries are validated via `transactions.create_transaction` before being saved with auto-incremented IDs.
 - **View transactions** (`[3]`): Lists the current user's history in a fixed-width table, sorted newest-first and annotated with the user's currency.
-- **Backup demo data** (`[5]`): Populates `users.json` with a demo account (if empty) and appends a sample transaction to `data/transaction.csv`.
 - **Reports** (`[4]`): Jump into summaries (balance, category, monthly) or print a filtered listing. Leave any filter input blank to skip that constraint.
+- **Save / Backup** (`[5]`): Opens the backup center so you can create a new ZIP snapshot, list existing backups, verify their manifests, or restore data safely.
 
 ## Reports & Filters
 - **Balance summary** totals lifetime income, expenses, and net using the current user's rows.
@@ -60,7 +63,13 @@ Demo credentials (added by the backup step): `Demo / 1234` (USD).
 ## Data & Backups
 - Users: `data/users.json` (list of dicts; hashed PINs under `auth`)
 - Transactions: `data/transaction.csv` (CSV headers defined in `storage.py`)
-- Backups: `backups/` is git-ignored so local exports stay private
+- Backups: `backups/` contains timestamped ZIP files (`backup-YYYYMMDD-HHMMSS.zip`) with `users.json`, `transactions.csv`, and a manifest that stores file sizes + SHA-256 hashes so integrity checks can run locally.
+
+## Backup Workflow
+1. **Make a backup**: Choose `[5] -> [1]` to generate a ZIP snapshot of `users.json` and `transactions.csv`. Files missing on disk are skipped automatically.
+2. **List backups**: `[5] -> [2]` shows every ZIP in `backups/`, newest first, so you can pick one for verification or restore.
+3. **Verify integrity**: `[5] -> [3]` re-computes SHA-256 hashes for each archived file and compares them with the manifest. Any mismatches or missing files are reported.
+4. **Restore data**: `[5] -> [4]` lets you pick a ZIP, confirms the overwrite, and writes only the whitelisted files (`users.json`, `transactions.csv`) back into `data/`. Use this after verifying a backup or when moving machines.
 
 ## Roadmap Ideas
 1. Paginated transaction viewer with filters (date range, category, payment method)
